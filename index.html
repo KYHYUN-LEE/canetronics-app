@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Canetronics 보호자</title>
+<meta name="description" content="스마트 지팡이의 위치, 낙상 경보, 안전구역 상태를 확인하는 보호자 앱">
+<meta name="theme-color" content="#157347">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="lib/leaflet.css">
+<style>
+/* 화면 구성: 위쪽 안전표지형 상태 띠 / 가운데 지도 / 아래 탭 시트 (넓은 화면에서는 오른쪽 칼럼) */
+:root {
+  --paper: #eef3f0;
+  --surface: #ffffff;
+  --surface-2: #f4f8f6;
+  --ink: #13201a;
+  --ink-2: #4a5a52;
+  --line: #d3ddd8;
+  --safe: #157347;
+  --watch: #9a5f00;
+  --alarm: #c3112d;
+  --off: #5f6a65;
+  --act: #1b5fc1;
+  --on-state: #ffffff;
+  --safe-text: #157347;
+  --watch-text: #8a5500;
+  --alarm-text: #b0102a;
+  --shadow: 0 6px 20px rgba(19, 32, 26, .16);
+  --font-sign: "Black Han Sans", "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --radius: 12px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0e1512; --surface: #16201b; --surface-2: #1c2822; --ink: #e4ece8; --ink-2: #9fb0a7;
+    --line: #2b3933; --safe: #1a7f4f; --watch: #a86a00; --alarm: #c81d37; --off: #4f5a55; --act: #6ea3ff;
+    --safe-text: #6fd6a2; --watch-text: #f2b84f; --alarm-text: #ff8595;
+    --shadow: 0 6px 20px rgba(0, 0, 0, .45);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0e1512; --surface: #16201b; --surface-2: #1c2822; --ink: #e4ece8; --ink-2: #9fb0a7;
+  --line: #2b3933; --safe: #1a7f4f; --watch: #a86a00; --alarm: #c81d37; --off: #4f5a55; --act: #6ea3ff;
+    --safe-text: #6fd6a2; --watch-text: #f2b84f; --alarm-text: #ff8595;
+  --shadow: 0 6px 20px rgba(0, 0, 0, .45);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.5;
+  word-break: keep-all;          /* 한국어: 단어 중간에서 줄바꿈하지 않음 */
+  overflow-wrap: break-word;
+  -webkit-tap-highlight-color: transparent;
+  overflow: hidden;
+}
+[hidden] { display: none !important; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 3px solid var(--act); outline-offset: 2px; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* ---------- 전체 틀 ---------- */
+.app {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: "band" "map" "sheet" "tabs";
+}
+
+/* ---------- 상태 띠 (안전표지) ---------- */
+.band {
+  grid-area: band;
+  position: relative;
+  background: var(--state, var(--off));
+  color: var(--on-state);
+  padding-top: max(12px, env(safe-area-inset-top, 0px));
+  padding-bottom: 14px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  transition: background-color .4s ease;
+  z-index: 500;
+}
+.app[data-level="ok"]    { --state: var(--safe); }
+.app[data-level="watch"] { --state: var(--watch); }
+.app[data-level="alarm"] { --state: var(--alarm); }
+.app[data-level="off"]   { --state: var(--off); }
+
+.band-inner { display: flex; align-items: center; gap: 14px; max-width: 1100px; }
+.band-icon { width: 52px; height: 52px; flex: none; }
+.band-text { min-width: 0; flex: 1; }
+.band-who { margin: 0; font-size: 13px; opacity: .88; }
+.band-word {
+  margin: 0;
+  font-family: var(--font-sign);
+  font-weight: 400;
+  font-size: 34px;
+  line-height: 1.1;
+  letter-spacing: .01em;
+}
+.band-detail { margin: 2px 0 0; font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
+.band-ring { width: 58px; height: 58px; flex: none; position: relative; }
+.band-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.band-ring circle { fill: none; stroke-width: 5; }
+.band-ring .track { stroke: rgba(255, 255, 255, .28); }
+.band-ring .fill { stroke: var(--on-state); stroke-linecap: round; transition: stroke-dashoffset .9s linear; }
+.band-ring span {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-family: var(--font-sign); font-size: 22px;
+}
+.band-progress { position: absolute; left: 0; right: 0; bottom: 0; height: 5px; background: rgba(255, 255, 255, .25); }
+.band-progress span { display: block; height: 100%; width: 0; background: var(--on-state); transition: width .9s linear; }
+
+/* ---------- 지도 ---------- */
+.map-wrap { grid-area: map; position: relative; min-height: 0; }
+#map { position: absolute; inset: 0; background: var(--surface-2); }
+.leaflet-container { font-family: var(--font-body); }
+:root[data-theme="dark"] .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9); }
+}
+.leaflet-control-attribution { font-size: 10px; }
+
+.map-tools {
+  position: absolute; right: max(12px, env(safe-area-inset-right, 0px)); bottom: 30px;
+  display: flex; flex-direction: column; gap: 8px; z-index: 450;
+}
+.icon-btn {
+  width: 46px; height: 46px; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  display: grid; place-items: center; box-shadow: var(--shadow); cursor: pointer;
+}
+.icon-btn svg { width: 22px; height: 22px; }
+.icon-btn[aria-pressed="true"] { color: var(--act); border-color: var(--act); }
+
+.map-hint {
+  position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+  z-index: 450; background: var(--ink); color: var(--paper);
+  padding: 8px 14px; border-radius: 999px; font-size: 14px; font-weight: 500;
+  max-width: calc(100% - 32px); text-align: center; box-shadow: var(--shadow);
+}
+
+.empty {
+  position: absolute; inset: 0; z-index: 460;
+  display: grid; place-items: center;
+  padding: 16px max(16px, env(safe-area-inset-right, 0px)) 16px max(16px, env(safe-area-inset-left, 0px));
+  background: color-mix(in srgb, var(--paper) 72%, transparent);
+}
+.empty-card {
+  max-width: 360px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow);
+  display: grid; gap: 12px;
+}
+.empty-card h2 { margin: 0; font-size: 18px; text-wrap: balance; }
+.empty-card p { margin: 0; color: var(--ink-2); }
+
+/* 지팡이 표시 */
+.cane-pin { position: relative; width: 26px; height: 26px; }
+.cane-pin i {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: var(--pin, var(--safe)); border: 3px solid #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .35);
+}
+.cane-pin[data-stale="true"] i { background: #fff; border-color: var(--pin, var(--off)); border-width: 4px; }
+.cane-pin[data-level="ok"]    { --pin: var(--safe); }
+.cane-pin[data-level="watch"] { --pin: var(--watch); }
+.cane-pin[data-level="alarm"] { --pin: var(--alarm); }
+.cane-pin[data-level="off"]   { --pin: var(--off); }
+.cane-pin[data-level="alarm"]::before {
+  content: ""; position: absolute; inset: -14px; border-radius: 50%;
+  background: var(--alarm); opacity: .35; animation: pulse 1.4s ease-out infinite;
+}
+@keyframes pulse { from { transform: scale(.5); opacity: .55; } to { transform: scale(1.6); opacity: 0; } }
+/* 지도 위 도형 (Leaflet SVG에 CSS로 색 지정 → 다크 모드에서도 토큰 사용) */
+path.lf-fence { stroke: var(--safe); fill: var(--safe); fill-opacity: .10; stroke-width: 3; stroke-dasharray: 9 6; }
+path.lf-fence.out { stroke: var(--watch); fill: var(--watch); fill-opacity: .12; }
+path.lf-acc { stroke: none; fill: var(--act); fill-opacity: .16; }
+path.lf-trail { stroke: var(--act); stroke-opacity: .65; stroke-width: 4; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+path.lf-draft { stroke: var(--act); fill: var(--act); fill-opacity: .12; stroke-width: 3; }
+.vertex-pin { width: 16px; height: 16px; border-radius: 50%; background: var(--act); border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+.event-pin { width: 18px; height: 18px; transform: rotate(45deg); background: var(--ink); border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+
+/* ---------- 아래 시트 ---------- */
+.sheet {
+  grid-area: sheet;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  max-height: 44dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.panel {
+  padding-top: 14px; padding-bottom: 18px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 18px;
+}
+.panel h2 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.group { min-width: 0; }
+
+.kv { margin: 0; display: grid; }
+.kv > div {
+  display: grid; grid-template-columns: 7.2em minmax(0, 1fr); gap: 12px;
+  padding: 7px 0; border-bottom: 1px solid var(--line);
+}
+.kv > div:last-child { border-bottom: 0; }
+.kv dt { color: var(--ink-2); }
+.kv dd { margin: 0; font-weight: 500; overflow-wrap: anywhere; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 1px 10px; border-radius: 999px; font-size: 13px; font-weight: 600;
+  background: color-mix(in srgb, var(--c, var(--off)) 14%, transparent);
+  color: var(--c, var(--off));
+  border: 1px solid color-mix(in srgb, var(--c, var(--off)) 40%, transparent);
+}
+.chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.chip.ok { --c: var(--safe-text); } .chip.watch { --c: var(--watch-text); } .chip.alarm { --c: var(--alarm-text); } .chip.off { --c: var(--ink-2); }
+.sub { color: var(--ink-2); font-weight: 400; font-size: 13px; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn {
+  min-height: 44px; padding: 8px 14px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+  font-weight: 600; cursor: pointer; text-decoration: none;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+}
+.btn:hover { border-color: var(--ink-2); }
+.btn.primary { background: var(--act); border-color: var(--act); color: #fff; }
+.btn.danger { color: var(--alarm); border-color: color-mix(in srgb, var(--alarm) 50%, transparent); }
+.btn.armed { background: var(--alarm); border-color: var(--alarm); color: #fff; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.grow { flex: 1 1 140px; }
+
+details.more summary { cursor: pointer; color: var(--ink-2); font-weight: 600; padding: 4px 0; }
+details.more[open] summary { margin-bottom: 4px; }
+
+/* 기록 */
+.log { list-style: none; margin: 0; padding: 0; display: grid; }
+.log li {
+  display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 10px; align-items: start;
+  padding: 10px 0; border-bottom: 1px solid var(--line);
+}
+.log li:last-child { border-bottom: 0; }
+.log .mark { width: 12px; height: 12px; margin-top: 5px; border-radius: 50%; background: var(--c, var(--off)); }
+.log .mark.alarm { --c: var(--alarm); border-radius: 2px; transform: rotate(45deg); }
+.log .mark.watch { --c: var(--watch); border-radius: 2px; }
+.log .mark.ok { --c: var(--safe); }
+.log .title { font-weight: 600; }
+.log .msg { color: var(--ink-2); font-size: 14px; overflow-wrap: anywhere; }
+.log .when { color: var(--ink-2); font-size: 12px; }
+.log .go { min-height: 36px; padding: 4px 10px; font-size: 13px; }
+.empty-line { color: var(--ink-2); margin: 0; }
+
+/* 안전구역 */
+.seg { display: inline-grid; grid-auto-flow: column; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.seg button { min-height: 42px; padding: 6px 18px; border: 0; background: var(--surface-2); cursor: pointer; font-weight: 600; color: var(--ink-2); }
+.seg button[aria-checked="true"] { background: var(--ink); color: var(--paper); }
+.range-row { display: grid; grid-template-columns: minmax(0, 1fr) 6.5em; gap: 12px; align-items: center; }
+.range-row input[type="range"] { width: 100%; accent-color: var(--act); min-height: 32px; }
+.range-row input[type="number"] {
+  width: 100%; min-height: 40px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--surface-2); text-align: right;
+}
+.hint { margin: 0; color: var(--ink-2); font-size: 14px; }
+.current-fence { margin: 0; font-size: 14px; color: var(--ink-2); }
+
+/* 설정 */
+.form { display: grid; gap: 12px; }
+.field { display: grid; gap: 4px; }
+.field label { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.field input {
+  width: 100%; min-height: 44px; padding: 8px 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--surface-2);
+}
+.field small { color: var(--ink-2); font-size: 12px; }
+.toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; }
+.toggle input { width: 22px; height: 22px; accent-color: var(--act); flex: none; }
+.copy-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.copy-row code {
+  flex: 1 1 180px; min-width: 0; padding: 10px 12px; border-radius: 10px;
+  background: var(--surface-2); border: 1px dashed var(--line); font-size: 14px; overflow-wrap: anywhere;
+}
+.fine { margin: 0; font-size: 13px; color: var(--ink-2); }
+.conn-line { margin: 0; font-size: 14px; }
+
+/* ---------- 탭 ---------- */
+.tabs {
+  grid-area: tabs;
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  background: var(--surface); border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+.tabs button {
+  min-height: 56px; border: 0; background: none; cursor: pointer;
+  display: grid; justify-items: center; align-content: center; gap: 2px;
+  color: var(--ink-2); font-size: 12px; font-weight: 600; position: relative;
+}
+.tabs svg { width: 22px; height: 22px; }
+.tabs button[aria-selected="true"] { color: var(--ink); }
+.tabs button[aria-selected="true"]::after {
+  content: ""; position: absolute; top: 0; left: 28%; right: 28%; height: 3px; border-radius: 0 0 3px 3px; background: var(--ink);
+}
+.tabs .badge {
+  position: absolute; top: 8px; left: calc(50% + 8px); min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: 9px; background: var(--alarm); color: #fff; font-size: 11px; line-height: 18px;
+}
+
+/* ---------- 낙상 전체 화면 ---------- */
+.takeover {
+  position: fixed; inset: 0; z-index: 2000;
+  background: var(--alarm); color: #fff;
+  overflow-y: auto;
+  padding-top: max(24px, env(safe-area-inset-top, 0px));
+  padding-bottom: max(24px, env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.to-inner { max-width: 480px; margin: 0 auto; display: grid; gap: 14px; justify-items: center; text-align: center; }
+.to-icon { width: 104px; height: 104px; animation: shake 1.6s ease-in-out infinite; }
+@keyframes shake { 0%, 100% { transform: rotate(0); } 10% { transform: rotate(-8deg); } 20% { transform: rotate(6deg); } 30% { transform: rotate(0); } }
+.to-word { margin: 0; font-family: var(--font-sign); font-weight: 400; font-size: clamp(48px, 15vw, 72px); line-height: 1; }
+.to-lead { margin: 0; font-size: 18px; font-weight: 600; text-wrap: balance; }
+.to-meta { margin: 0; font-size: 15px; opacity: .92; }
+.to-where {
+  width: 100%; padding: 12px; border-radius: 12px; background: rgba(0, 0, 0, .18);
+  font-size: 16px; font-weight: 600;
+}
+.to-actions { width: 100%; display: grid; gap: 10px; margin-top: 4px; }
+.to-actions .btn { width: 100%; min-height: 52px; font-size: 17px; border-color: rgba(255, 255, 255, .55); background: rgba(255, 255, 255, .12); color: #fff; }
+.to-actions .btn.solid { background: #fff; color: var(--alarm); border-color: #fff; }
+.to-actions .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.to-where strong { display: block; font-size: 20px; }
+.to-where span { display: block; font-size: 14px; font-weight: 500; opacity: .9; }
+
+/* ---------- 알림 토스트 ---------- */
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px)); z-index: 2100;
+  background: var(--ink); color: var(--paper); padding: 10px 16px; border-radius: 10px;
+  max-width: calc(100% - 32px); box-shadow: var(--shadow); font-weight: 500;
+}
+
+/* ---------- 넓은 화면: 지도 + 오른쪽 칼럼 ---------- */
+@media (min-width: 900px) {
+  .app {
+    grid-template-columns: minmax(0, 1fr) 400px;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-areas: "band band" "map tabs" "map sheet";
+  }
+  .sheet { max-height: none; border-top: 0; border-left: 1px solid var(--line); }
+  .tabs { border-top: 0; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); padding-bottom: 0; }
+  .tabs button[aria-selected="true"]::after { top: auto; bottom: 0; border-radius: 3px 3px 0 0; }
+  .band-word { font-size: 40px; }
+  .toast { bottom: 24px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="app" id="app" data-level="off">
+
+  <header class="band" id="band" aria-live="polite">
+    <div class="band-inner">
+      <svg class="band-icon" id="bandIcon" viewBox="0 0 48 48" aria-hidden="true"></svg>
+      <div class="band-text">
+        <p class="band-who" id="bandWho">지팡이</p>
+        <h1 class="band-word" id="bandWord">연결 중</h1>
+        <p class="band-detail" id="bandDetail">서버에 연결하고 있습니다</p>
+      </div>
+      <div class="band-ring" id="bandRing" hidden>
+        <svg viewBox="0 0 60 60" aria-hidden="true">
+          <circle class="track" cx="30" cy="30" r="25"></circle>
+          <circle class="fill" id="bandRingFill" cx="30" cy="30" r="25" stroke-dasharray="157.08" stroke-dashoffset="0"></circle>
+        </svg>
+        <span class="num" id="bandRingText">10</span>
+      </div>
+    </div>
+    <div class="band-progress" id="bandProgress" hidden><span id="bandProgressFill"></span></div>
+  </header>
+
+  <main class="map-wrap">
+    <div id="map" aria-label="지팡이 위치 지도"></div>
+    <div class="map-tools">
+      <button class="icon-btn" id="btnFollow" type="button" aria-pressed="true" title="지팡이 따라가기" aria-label="지팡이 위치로 이동">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+      </button>
+      <button class="icon-btn" id="btnFitFence" type="button" title="안전구역 전체 보기" aria-label="안전구역 전체 보기">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8" stroke-dasharray="3 3"/><path d="M12 9v6M9 12h6"/></svg>
+      </button>
+    </div>
+    <p class="map-hint" id="mapHint" hidden></p>
+
+    <div class="empty" id="emptyState" hidden>
+      <div class="empty-card">
+        <h2 id="emptyTitle">지팡이 위치를 기다리고 있습니다</h2>
+        <p id="emptyText">지팡이가 켜져 있고 휴대폰 핫스팟에 연결되면 이곳에 위치가 나타납니다.</p>
+        <div class="actions">
+          <button class="btn primary grow" id="btnEmptyDemo" type="button">데모로 둘러보기</button>
+          <button class="btn grow" id="btnEmptySettings" type="button">연결 설정 열기</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <section class="sheet" id="sheet">
+
+    <!-- 상태 -->
+    <div class="panel" id="panel-status" role="tabpanel" aria-labelledby="tab-status">
+      <div class="group">
+        <h2>위치</h2>
+        <dl class="kv">
+          <div><dt>GPS</dt><dd id="sGps">-</dd></div>
+          <div><dt>좌표</dt><dd class="num" id="sCoord">-</dd></div>
+          <div><dt>정확도</dt><dd id="sAcc">-</dd></div>
+          <div><dt>안전구역</dt><dd id="sFence">-</dd></div>
+        </dl>
+        <div class="actions" style="margin-top:10px">
+          <a class="btn grow" id="lnkKakao" href="#" target="_blank" rel="noopener">카카오맵에서 보기</a>
+          <a class="btn grow" id="lnkGoogle" href="#" target="_blank" rel="noopener">구글 지도에서 보기</a>
+        </div>
+      </div>
+
+      <div class="group">
+        <h2>지팡이</h2>
+        <dl class="kv">
+          <div><dt>연결</dt><dd id="sOnline">-</dd></div>
+          <div><dt>낙상 감지</dt><dd id="sFall">-</dd></div>
+          <div><dt>최근 판정</dt><dd id="sLastEvent">-</dd></div>
+          <div><dt>움직임 센서</dt><dd id="sImu">-</dd></div>
+          <div><dt>배터리</dt><dd id="sBat">-</dd></div>
+          <div><dt>Wi-Fi 신호</dt><dd id="sRssi">-</dd></div>
+        </dl>
+      </div>
+
+      <details class="more">
+        <summary>센서 세부값</summary>
+        <dl class="kv">
+          <div><dt>충격 점수</dt><dd class="num" id="dShock">-</dd></div>
+          <div><dt>기울기</dt><dd class="num" id="dTilt">-</dd></div>
+          <div><dt>위성 수</dt><dd class="num" id="dSats">-</dd></div>
+          <div><dt>HDOP</dt><dd class="num" id="dHdop">-</dd></div>
+          <div><dt>최초 수신</dt><dd class="num" id="dTtff">-</dd></div>
+          <div><dt>GPS 문자</dt><dd class="num" id="dChars">-</dd></div>
+          <div><dt>펌웨어</dt><dd class="num" id="dFw">-</dd></div>
+          <div><dt>가동 시간</dt><dd class="num" id="dUp">-</dd></div>
+        </dl>
+      </details>
+
+      <div class="group">
+        <h2>원격 조작</h2>
+        <div class="actions">
+          <button class="btn grow" id="btnRecal" type="button" data-label="기준 자세 다시 잡기">기준 자세 다시 잡기</button>
+          <button class="btn danger grow" id="btnReset" type="button" data-label="낙상 판정 초기화">낙상 판정 초기화</button>
+        </div>
+        <p class="fine" style="margin-top:8px">버튼을 두 번 눌러야 실행됩니다. 기준 자세는 지팡이를 바르게 세운 상태에서 3초간 다시 잡습니다.</p>
+      </div>
+    </div>
+
+    <!-- 기록 -->
+    <div class="panel" id="panel-log" role="tabpanel" aria-labelledby="tab-log" hidden>
+      <div class="actions">
+        <label class="toggle btn grow" for="setTrail">이동 경로 표시 <input type="checkbox" id="setTrail"></label>
+        <button class="btn grow" id="btnClearLog" type="button" data-label="기록 지우기">기록 지우기</button>
+      </div>
+      <ol class="log" id="logList"></ol>
+      <p class="empty-line" id="logEmpty">아직 기록된 일이 없습니다. 낙상 경보, 안전구역 이탈과 복귀, GPS 수신 변화가 여기에 쌓입니다.</p>
+    </div>
+
+    <!-- 안전구역 -->
+    <div class="panel" id="panel-fence" role="tabpanel" aria-labelledby="tab-fence" hidden>
+      <div class="seg" role="radiogroup" aria-label="안전구역 모양">
+        <button type="button" role="radio" id="fenceCircle" aria-checked="true">원형</button>
+        <button type="button" role="radio" id="fencePolygon" aria-checked="false">다각형</button>
+      </div>
+
+      <div class="group" id="circleTools">
+        <p class="hint">지도를 누르면 그곳이 안전구역의 중심이 됩니다.</p>
+        <div class="range-row" style="margin-top:10px">
+          <input type="range" id="fenceRadius" min="10" max="500" step="5" value="30" aria-label="반경">
+          <input type="number" id="fenceRadiusNum" min="5" max="5000" step="1" value="30" aria-label="반경(미터)">
+        </div>
+        <div class="actions" style="margin-top:8px">
+          <button class="btn grow" id="btnCenterHere" type="button">지팡이 현재 위치를 중심으로</button>
+        </div>
+      </div>
+
+      <div class="group" id="polygonTools" hidden>
+        <p class="hint">지도를 차례로 눌러 구역의 꼭짓점을 찍으세요. 3개에서 12개까지 가능합니다.</p>
+        <p class="current-fence" id="polyCount" style="margin-top:6px">꼭짓점 0개</p>
+        <div class="actions" style="margin-top:8px">
+          <button class="btn grow" id="btnPolyUndo" type="button">마지막 점 지우기</button>
+          <button class="btn grow" id="btnPolyClear" type="button">모두 지우기</button>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn primary grow" id="btnApplyFence" type="button">지팡이에 적용</button>
+        <button class="btn grow" id="btnRevertFence" type="button">지금 설정으로 되돌리기</button>
+      </div>
+      <p class="current-fence" id="fenceCurrent">지팡이에 저장된 안전구역: -</p>
+    </div>
+
+    <!-- 설정 -->
+    <div class="panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+      <form class="form" id="formConn" autocomplete="off">
+        <div class="field">
+          <label for="setName">보호 대상자 호칭</label>
+          <input id="setName" type="text" maxlength="20" placeholder="예: 어머니">
+        </div>
+        <div class="field">
+          <label for="setDevice">기기 ID</label>
+          <input id="setDevice" type="text" required spellcheck="false" autocapitalize="off">
+          <small>펌웨어 CloudConfig.h의 DEVICE_ID와 같아야 합니다.</small>
+        </div>
+        <div class="field">
+          <label for="setBroker">MQTT 서버 주소</label>
+          <input id="setBroker" type="url" required spellcheck="false" autocapitalize="off">
+          <small>예: wss://broker.emqx.io:8084/mqtt</small>
+        </div>
+        <div class="field">
+          <label for="setPhone">보호 대상자 전화번호 (선택)</label>
+          <input id="setPhone" type="tel" placeholder="010-0000-0000">
+        </div>
+        <button class="btn primary" type="submit">저장하고 다시 연결</button>
+        <p class="conn-line" id="connLine">서버: -</p>
+      </form>
+
+      <div class="group">
+        <h2>앱을 닫아도 알림 받기</h2>
+        <p class="fine">휴대폰에 ntfy 앱을 설치하고 아래 주제를 구독하면, 지팡이가 낙상과 안전구역 이탈을 직접 알려 줍니다.</p>
+        <div class="copy-row" style="margin-top:8px">
+          <code id="ntfyTopicText">-</code>
+          <button class="btn" id="btnCopyTopic" type="button">복사</button>
+        </div>
+        <div class="field" style="margin-top:8px">
+          <label for="setTopic">알림 주제</label>
+          <input id="setTopic" type="text" spellcheck="false" autocapitalize="off">
+          <small>펌웨어 CloudConfig.h의 NTFY_TOPIC과 같아야 합니다.</small>
+        </div>
+        <div class="actions" style="margin-top:8px">
+          <a class="btn grow" id="lnkNtfy" href="https://ntfy.sh/" target="_blank" rel="noopener">웹에서 구독하기</a>
+        </div>
+      </div>
+
+      <div class="group">
+        <h2>이 기기에서</h2>
+        <label class="toggle" for="setSound">앱이 열려 있을 때 경보음 울리기 <input type="checkbox" id="setSound"></label>
+        <label class="toggle" for="setNotify">앱이 백그라운드일 때 알림 띄우기 <input type="checkbox" id="setNotify"></label>
+        <button class="btn" id="btnTestSound" type="button" style="margin-top:6px">경보음 시험</button>
+      </div>
+
+      <div class="group">
+        <h2>데모</h2>
+        <p class="fine">가상 지팡이가 공과대학 4호관 주변을 걷다가 안전구역을 벗어나고, 돌아와서 넘어지는 상황을 재현합니다. 실제 서버로는 아무것도 보내지 않습니다.</p>
+        <div class="actions" style="margin-top:8px">
+          <button class="btn grow" id="btnDemo" type="button">데모 시작</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <h2>가족과 공유</h2>
+        <p class="fine">이 링크를 열면 같은 지팡이에 연결된 상태로 시작합니다.</p>
+        <div class="copy-row" style="margin-top:8px">
+          <code id="shareLink">-</code>
+          <button class="btn" id="btnCopyShare" type="button">복사</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <nav class="tabs" role="tablist" aria-label="화면 전환">
+    <button type="button" role="tab" id="tab-status" data-tab="status" aria-selected="true" aria-controls="panel-status">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>상태
+    </button>
+    <button type="button" role="tab" id="tab-log" data-tab="log" aria-selected="false" aria-controls="panel-log">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>기록
+      <span class="badge num" id="logBadge" hidden>0</span>
+    </button>
+    <button type="button" role="tab" id="tab-fence" data-tab="fence" aria-selected="false" aria-controls="panel-fence">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8" stroke-dasharray="3.2 2.6"/><circle cx="12" cy="12" r="2.2"/></svg>안전구역
+    </button>
+    <button type="button" role="tab" id="tab-settings" data-tab="settings" aria-selected="false" aria-controls="panel-settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>설정
+    </button>
+  </nav>
+</div>
+
+<!-- 낙상 확정 시 전체 화면 경보 -->
+<div class="takeover" id="takeover" role="alertdialog" aria-modal="true" aria-labelledby="toWord" hidden>
+  <div class="to-inner">
+    <svg class="to-icon" viewBox="0 0 48 48" aria-hidden="true" id="toIcon"></svg>
+    <h2 class="to-word" id="toWord">낙상 발생</h2>
+    <p class="to-lead" id="toLead">넘어진 뒤 움직임이 없고 경보도 취소되지 않았습니다.</p>
+    <p class="to-meta num" id="toWhen">-</p>
+    <div class="to-where num" id="toWhere">-</div>
+    <div class="to-actions">
+      <a class="btn solid" id="toKakao" href="#" target="_blank" rel="noopener">카카오맵으로 위치 확인</a>
+      <div class="pair">
+        <a class="btn" id="toCallPerson" href="#" hidden>본인에게 전화</a>
+        <a class="btn" id="toCall119" href="tel:119">119에 전화</a>
+      </div>
+      <div class="pair">
+        <button class="btn" id="toMute" type="button">경보음 끄기</button>
+        <button class="btn" id="toMap" type="button">지도 보기</button>
+      </div>
+      <button class="btn" id="toResolve" type="button" data-label="상황 종료하고 경보 해제">상황 종료하고 경보 해제</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="lib/leaflet.js"></script>
+<script src="lib/mqtt.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

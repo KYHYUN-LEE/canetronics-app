@@ -1,0 +1,17 @@
+{
+  "name": "Canetronics 보호자",
+  "short_name": "지팡이 보호자",
+  "description": "스마트 지팡이의 위치, 낙상 경보, 안전구역 상태 확인",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#eef3f0",
+  "theme_color": "#157347",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
