@@ -680,7 +680,7 @@ function renderStatus() {
   const set = (id, html) => { const el = $(id); if (el.innerHTML !== html) el.innerHTML = html; };
 
   if (!st) {
-    ['sGps', 'sCoord', 'sAcc', 'sFence', 'sFall', 'sLastEvent', 'sImu', 'sBat', 'sRssi',
+    ['sGps', 'sCoord', 'sAcc', 'sFence', 'sFall', 'sLastEvent', 'sImu', 'sRssi',
       'dShock', 'dTilt', 'dSats', 'dHdop', 'dTtff', 'dChars', 'dFw', 'dUp'].forEach((id) => set(id, '-'));
     set('sOnline', S.source === 'mqtt' && S.conn === 'connected' ? chip('지팡이 응답 없음', 'off') : chip('서버 연결 전', 'off'));
     setMapLinks(null);
@@ -723,13 +723,6 @@ function renderStatus() {
   if (!st.imu?.ok) set('sImu', chip('연결 안 됨', 'alarm'));
   else if (!st.imu?.data) set('sImu', chip('데이터 없음', 'watch'));
   else set('sImu', chip('정상', 'ok'));
-
-  if (st.bat && st.bat.pct >= 0) {
-    const lvl = st.bat.pct <= 15 ? 'alarm' : st.bat.pct <= 30 ? 'watch' : 'ok';
-    set('sBat', `${chip(`${st.bat.pct}%`, lvl)} <span class="sub">${st.bat.v.toFixed(2)} V</span>`);
-  } else {
-    set('sBat', '<span class="sub">측정 회로 연결 전</span>');
-  }
 
   const rssi = st.rssi;
   if (rssi && rssi < 0) {
@@ -1461,7 +1454,6 @@ const Demo = (() => {
         age: d.ever ? 300 + Math.floor(Math.random() * 600) : 0, ttff: d.ttff, chars: d.tick * 520, bad: 0,
       },
       geo: { type: d.fence.type, state: d.geoState, dist: +d.dist.toFixed(1), r: d.fence.r || 0, ver: d.fenceVer },
-      bat: { v: 3.92, pct: 74 },
     });
   }
 

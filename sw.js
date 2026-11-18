@@ -1,6 +1,6 @@
 // 앱 화면 파일을 저장해 두어 통신이 불안정할 때도 앱이 열리도록 함
 // 파일을 고친 뒤에는 CACHE 이름의 숫자를 올리면 휴대폰이 새 버전을 받습니다.
-const CACHE = 'canetronics-v1';
+const CACHE = 'canetronics-v2';
 const SHELL = [
   './',
   './index.html',
